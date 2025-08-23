@@ -1,154 +1,130 @@
 import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # -------------------------------
 # Constants
 # -------------------------------
-GRAVITY = 9.81  # m/s^2
-WATER_DENSITY = 1000  # kg/m^3
-HOURS_PER_YEAR = 24 * 365
+GRAVITY = 9.81
+WATER_DENSITY = 1000
+HOURS_PER_YEAR = 24*365
 
 # -------------------------------
 # Functions
 # -------------------------------
-def geothermal_thermal_power(mass_flow, Cp, delta_T):
-    """Compute thermal power from geothermal source (kW)."""
-    return mass_flow * Cp * delta_T
+def geothermal_thermal_power(m, Cp, delta_T):
+    return m * Cp * delta_T
 
-def geothermal_electric_power(Qthermal, efficiency):
-    """Convert thermal power to electric power using turbine efficiency."""
-    return Qthermal * efficiency
+def geothermal_electric_power(Qthermal, eff):
+    return Qthermal * eff
 
 def recovered_waste_power(E_input, wasted_fraction, AI_fraction):
-    """Compute electricity recovered from wasted energy."""
     return E_input * wasted_fraction * AI_fraction
 
 def waterfall_power(flow_rate, height, efficiency):
-    """Compute hydropower output (kW)."""
-    P_watts = WATER_DENSITY * GRAVITY * flow_rate * height * efficiency
-    return P_watts / 1000  # kW
+    return WATER_DENSITY * GRAVITY * flow_rate * height * efficiency / 1000  # kW
 
 def annual_energy(power_kw):
     return power_kw * HOURS_PER_YEAR
 
-def households_powered(Eyear, consumption_per_household=7200):
-    return Eyear / consumption_per_household
+def households_powered(Eyear, per_house=7200):
+    return Eyear / per_house
 
-def generate_report_df(Pgeo, Pwaste, Pwaterfall):
-    data = {
-        "Source": ["Geothermal + Waste", "Waterfall Turbine"],
-        "Power Output (kW)": [Pgeo + Pwaste, Pwaterfall]
-    }
-    df = pd.DataFrame(data)
-    df["Annual Energy (kWh)"] = df["Power Output (kW)"] * HOURS_PER_YEAR
-    df["Households Powered"] = df["Annual Energy (kWh)"] / 7200
-    return df
+# Optimization functions
+def optimize_waste_fraction(E_input, wasted_fraction, Qthermal, geo_eff):
+    """Maximize total electricity by varying AI fraction from 0 to 1."""
+    fractions = np.linspace(0, 1, 101)
+    best_fraction = 0
+    best_total = 0
+    for f in fractions:
+        Ptotal = geothermal_electric_power(Qthermal, geo_eff) + recovered_waste_power(E_input, wasted_fraction, f)
+        if Ptotal > best_total:
+            best_total = Ptotal
+            best_fraction = f
+    return best_fraction, best_total
 
-# -------------------------------
-# Streamlit App
-# -------------------------------
-st.set_page_config(page_title="Sustainable Electricity Simulator", layout="wide")
-st.title("🌱 Sustainable Electricity Generation Simulator")
-
-st.markdown("""
-This app simulates electricity generation from **dual-source geothermal + wasted energy recovery** 
-and **mountain-attached waterfall turbines**.  
-Adjust parameters or use scenario presets to explore different outcomes.
-""")
-
-# -------------------------------
-# Tabs for better UX
-# -------------------------------
-tab1, tab2, tab3 = st.tabs(["Geothermal + Waste", "Waterfall Turbine", "Summary & Charts"])
+def optimize_turbine(flow_rate, height):
+    """Find optimal turbine efficiency in realistic range 0.6–0.95."""
+    efficiencies = np.linspace(0.6, 0.95, 36)
+    best_eff = 0.6
+    best_power = 0
+    for eff in efficiencies:
+        P = waterfall_power(flow_rate, height, eff)
+        if P > best_power:
+            best_power = P
+            best_eff = eff
+    return best_eff, best_power
 
 # -------------------------------
-# Tab 1: Geothermal + Waste
+# Streamlit UI
 # -------------------------------
-with tab1:
-    st.header("1️⃣ Geothermal + Wasted Energy Recovery System")
+st.title("🌱 Sustainable Electricity Simulator with AI Optimization")
+
+st.header("1️⃣ Geothermal + Waste Recovery")
+mass_flow = st.slider("Geothermal Mass Flow (kg/s)", 1, 150, 10)
+Cp = st.slider("Specific Heat Cp (kJ/kg·K)", 1.0, 5.0, 4.18)
+delta_T = st.slider("Temperature Rise ΔT (K)", 50, 300, 150)
+geo_eff = st.slider("Geothermal Efficiency", 0.01, 1.0, 0.12)
+E_input = st.number_input("Input Electricity for Waste Recovery (kW)", 1, 1000, 100)
+wasted_fraction = st.slider("Fraction of Energy Wasted", 0.0, 1.0, 0.3)
+AI_fraction = st.slider("AI Fraction of Waste Intercepted", 0.0, 1.0, 0.7)
+
+Qthermal = geothermal_thermal_power(mass_flow, Cp, delta_T)
+Pgeo = geothermal_electric_power(Qthermal, geo_eff)
+Pwaste = recovered_waste_power(E_input, wasted_fraction, AI_fraction)
+Ptotal_geo = Pgeo + Pwaste
+Eyear_geo = annual_energy(Ptotal_geo)
+households_geo = households_powered(Eyear_geo)
+
+st.write(f"Current Total Geothermal + Waste Electricity: **{Ptotal_geo:,.2f} kW**")
+st.write(f"Annual Energy: **{Eyear_geo:,.0f} kWh**")
+st.write(f"Households Powered: **{households_geo:,.0f}**")
+
+# -------------------------------
+# 2️⃣ Waterfall Turbine
+# -------------------------------
+st.header("2️⃣ Mountain-Attached Waterfall Turbine")
+flow_rate = st.slider("Water Flow Rate (m³/s)", 0.1, 50.0, 10.0)
+height = st.slider("Waterfall Height (m)", 5, 200, 50)
+turbine_eff = st.slider("Current Turbine Efficiency", 0.6, 0.95, 0.9)
+
+Pwaterfall = waterfall_power(flow_rate, height, turbine_eff)
+Eyear_waterfall = annual_energy(Pwaterfall)
+households_waterfall = households_powered(Eyear_waterfall)
+
+st.write(f"Current Waterfall Turbine Power: **{Pwaterfall:,.2f} kW**")
+st.write(f"Annual Energy: **{Eyear_waterfall:,.0f} kWh**")
+st.write(f"Households Powered: **{households_waterfall:,.0f}**")
+
+# -------------------------------
+# AI Optimization
+# -------------------------------
+st.header("🤖 AI Optimization Suggestions")
+if st.button("Run Optimization"):
+    opt_AI_fraction, Ptotal_opt_geo = optimize_waste_fraction(E_input, wasted_fraction, Qthermal, geo_eff)
+    opt_turb_eff, Pwaterfall_opt = optimize_turbine(flow_rate, height)
     
-    scenario = st.selectbox("Select Scenario:", 
-                            ["Custom", "Small Well", "Large Well", "Extreme High Output"])
+    Eyear_opt_geo = annual_energy(Ptotal_opt_geo)
+    households_opt_geo = households_powered(Eyear_opt_geo)
     
-    # Default values
-    mass_flow, Cp, delta_T, geothermal_eff, E_input, wasted_fraction, AI_fraction = 10, 4.18, 150, 0.12, 100, 0.3, 0.7
+    Eyear_opt_water = annual_energy(Pwaterfall_opt)
+    households_opt_water = households_powered(Eyear_opt_water)
     
-    if scenario == "Small Well":
-        mass_flow, delta_T, geothermal_eff = 10, 150, 0.12
-    elif scenario == "Large Well":
-        mass_flow, delta_T, geothermal_eff = 50, 200, 0.12
-    elif scenario == "Extreme High Output":
-        mass_flow, delta_T, geothermal_eff = 100, 250, 0.15
-
-    # Inputs
-    mass_flow = st.slider("Geothermal Mass Flow (kg/s)", 1, 150, mass_flow)
-    Cp = st.slider("Specific Heat Capacity Cp (kJ/kg·K)", 1.0, 5.0, Cp, 0.01)
-    delta_T = st.slider("Temperature Rise ΔT (K)", 50, 300, delta_T)
-    geothermal_eff = st.slider("Geothermal Conversion Efficiency (0-1)", 0.01, 1.0, geothermal_eff)
-    E_input = st.number_input("Input Electricity for Waste Recovery (kW)", 1, 1000, E_input)
-    wasted_fraction = st.slider("Fraction of Energy Wasted (0-1)", 0.0, 1.0, wasted_fraction)
-    AI_fraction = st.slider("AI Recovered Fraction of Waste (0-1)", 0.0, 1.0, AI_fraction)
-
-    # Calculations
-    Qthermal = geothermal_thermal_power(mass_flow, Cp, delta_T)
-    Pgeothermal = geothermal_electric_power(Qthermal, geothermal_eff)
-    Pwaste = recovered_waste_power(E_input, wasted_fraction, AI_fraction)
-    Ptotal_geothermal = Pgeothermal + Pwaste
-    Eyear_geo = annual_energy(Ptotal_geothermal)
-    households_geo = households_powered(Eyear_geo)
-
-    st.markdown(f"**Thermal Power:** {Qthermal:,.2f} kW")
-    st.markdown(f"**Electricity from Geothermal:** {Pgeothermal:,.2f} kW")
-    st.markdown(f"**Recovered Waste Electricity:** {Pwaste:,.2f} kW")
-    st.markdown(f"**Total Geothermal + Waste Electricity:** {Ptotal_geothermal:,.2f} kW")
-    st.markdown(f"**Annual Energy:** {Eyear_geo:,.0f} kWh/year")
-    st.markdown(f"**Households Powered:** {households_geo:,.0f} families")
-
-# -------------------------------
-# Tab 2: Waterfall Turbine
-# -------------------------------
-with tab2:
-    st.header("2️⃣ Mountain-Attached Waterfall Turbine System")
+    st.subheader("Geothermal + Waste Optimization")
+    st.write(f"Optimal AI Fraction: **{opt_AI_fraction:.2f}**")
+    st.write(f"Optimized Total Geothermal + Waste Power: **{Ptotal_opt_geo:,.2f} kW**")
+    st.write(f"Annual Energy: **{Eyear_opt_geo:,.0f} kWh**")
+    st.write(f"Households Powered: **{households_opt_geo:,.0f}**")
     
-    flow_rate = st.slider("Water Flow Rate (m³/s)", 0.1, 50.0, 10.0)
-    waterfall_height = st.slider("Waterfall Height (m)", 5, 200, 50)
-    turbine_eff = st.slider("Turbine Efficiency (0-1)", 0.1, 1.0, 0.9)
-
-    Pwaterfall = waterfall_power(flow_rate, waterfall_height, turbine_eff)
-    Eyear_waterfall = annual_energy(Pwaterfall)
-    households_waterfall = households_powered(Eyear_waterfall)
-
-    st.markdown(f"**Electricity Generated:** {Pwaterfall:,.2f} kW")
-    st.markdown(f"**Annual Energy:** {Eyear_waterfall:,.0f} kWh/year")
-    st.markdown(f"**Households Powered:** {households_waterfall:,.0f} families")
-
-# -------------------------------
-# Tab 3: Summary & Charts
-# -------------------------------
-with tab3:
-    st.header("3️⃣ Combined Output & Visualization")
-
-    total_power = Ptotal_geothermal + Pwaterfall
-    total_energy = Eyear_geo + Eyear_waterfall
-    total_households = households_geo + households_waterfall
-
-    st.markdown(f"**Total Power Output:** {total_power:,.2f} kW")
-    st.markdown(f"**Total Annual Energy:** {total_energy:,.0f} kWh/year")
-    st.markdown(f"**Total Households Powered:** {total_households:,.0f} families")
-
-    # Bar Chart
-    df = generate_report_df(Pgeothermal, Pwaste, Pwaterfall)
-    st.bar_chart(df.set_index("Source")["Power Output (kW)"])
-
-    # Download CSV
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Report as CSV", csv, "energy_report.csv", "text/csv")
-
-    # Optional: Add Prototype/Diagram link
-    prototype_url = st.text_input("Add link to virtual prototype / diagrams (Google Drive or GitHub)", "")
-    if prototype_url:
-        st.markdown(f"[Click here to view prototype/diagrams]({prototype_url})", unsafe_allow_html=True)
-
-st.success("💡 Simulation complete! Adjust parameters to explore different scenarios.")
+    st.subheader("Waterfall Turbine Optimization")
+    st.write(f"Optimal Turbine Efficiency: **{opt_turb_eff:.2f}**")
+    st.write(f"Optimized Waterfall Turbine Power: **{Pwaterfall_opt:,.2f} kW**")
+    st.write(f"Annual Energy: **{Eyear_opt_water:,.0f} kWh**")
+    st.write(f"Households Powered: **{households_opt_water:,.0f}**")
+    
+    total_current = Ptotal_geo + Pwaterfall
+    total_optimized = Ptotal_opt_geo + Pwaterfall_opt
+    st.subheader("✅ Combined Summary")
+    st.write(f"Current Total Power: {total_current:,.2f} kW")
+    st.write(f"Optimized Total Power: {total_optimized:,.2f} kW")
